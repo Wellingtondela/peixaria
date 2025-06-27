@@ -1,11 +1,12 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const { MercadoPagoConfig, payments } = require('mercadopago');
 const admin = require('./firebaseConfig');
+const { Payment, configure } = require('mercadopago');
 
-// Configuração do SDK do Mercado Pago (versão 2.7.0+)
-const mp = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
+configure({
+  access_token: process.env.MP_ACCESS_TOKEN
+});
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -14,7 +15,7 @@ app.use(cors());
 app.use(bodyParser.json());
 
 app.get('/', (req, res) => {
-  res.send('Backend está rodando! Use /pagamento/:id?valor=XX para testar.');
+  res.send('Backend está rodando! Use /pagamento/:id?valor=XX');
 });
 
 app.get('/pagamento/:id', async (req, res) => {
@@ -27,20 +28,22 @@ app.get('/pagamento/:id', async (req, res) => {
       return res.status(404).json({ erro: 'Pedido não encontrado' });
     }
 
-    const pagamento = {
+    const pagamentoCriado = await Payment.create({
       transaction_amount: valor,
       description: `Pedido Tilápia Peixaria SLZ #${id}`,
       payment_method_id: "pix",
       payer: { email: "cliente@email.com" },
       notification_url: "https://peixaria.onrender.com/webhook"
-    };
+    });
 
-    const pagamentoCriado = await payments.create({ body: pagamento, config: mp });
-    const pix = pagamentoCriado.point_of_interaction.transaction_data;
+    const pix = pagamentoCriado.body?.point_of_interaction?.transaction_data;
+    if (!pix) {
+      throw new Error("Erro ao gerar QR Code Pix.");
+    }
 
     await admin.firestore().collection('pedidos').doc(id).update({
       status: "aguardando pagamento",
-      pagamento_id: pagamentoCriado.id,
+      pagamento_id: pagamentoCriado.body.id,
       valor
     });
 
@@ -50,38 +53,11 @@ app.get('/pagamento/:id', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erro ao gerar pagamento:', error);
+    console.error('Erro ao gerar pagamento:', error.message || error);
     res.status(500).json({ erro: 'Erro ao gerar pagamento', detalhes: error.message });
   }
 });
 
-app.post('/webhook', async (req, res) => {
-  const pagamentoId = req.body.data?.id;
-  if (!pagamentoId) {
-    return res.status(400).json({ erro: 'ID do pagamento não informado' });
-  }
-
-  try {
-    const pagamento = await payments.get({ id: pagamentoId, config: mp });
-    if (pagamento.status === "approved") {
-      const snapshot = await admin.firestore().collection('pedidos')
-        .where("pagamento_id", "==", pagamentoId).limit(1).get();
-
-      if (!snapshot.empty) {
-        const pedidoRef = snapshot.docs[0].ref;
-        await pedidoRef.update({
-          status: "em preparo",
-          pago_em: new Date()
-        });
-      }
-    }
-    res.sendStatus(200);
-  } catch (error) {
-    console.error('Erro no webhook:', error);
-    res.status(500).json({ erro: 'Erro no webhook', detalhes: error.message });
-  }
-});
-
 app.listen(port, () => {
-  console.log(`✅ Servidor rodando na porta ${port}`);
+  console.log(`Servidor rodando na porta ${port}`);
 });
