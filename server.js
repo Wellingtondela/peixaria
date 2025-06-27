@@ -1,9 +1,30 @@
+const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const admin = require('./firebaseConfig'); // Firebase Admin inicializado
+const { MercadoPagoConfig, Payment } = require('mercadopago');
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.use(cors());
+app.use(bodyParser.json());
+app.use(express.static('public')); // Para servir HTML do Pix se quiser
+
+// Token de acesso Mercado Pago
+const mpAccessToken = process.env.MP_ACCESS_TOKEN || 'SEU_TOKEN_DO_MERCADO_PAGO_AQUI';
+const mp = new MercadoPagoConfig({ accessToken: mpAccessToken });
+
+app.get('/', (req, res) => {
+  res.send('✅ Backend da Peixaria SLZ rodando. Use /pagamento/:id?valor=XX');
+});
+
 app.get('/pagamento/:id', async (req, res) => {
   const id = req.params.id;
   const valorParam = req.query.valor;
   const valor = valorParam && !isNaN(parseFloat(valorParam)) ? parseFloat(valorParam) : 30;
 
-  console.log("💰 Valor usado para pagamento:", valor); // debug
+  console.log("💰 Valor usado para pagamento:", valor);
 
   try {
     const pedidoDoc = await admin.firestore().collection('pedidos').doc(id).get();
@@ -43,4 +64,8 @@ app.get('/pagamento/:id', async (req, res) => {
     console.error('❌ Erro ao gerar pagamento:', error);
     res.status(500).json({ erro: 'Erro ao gerar pagamento', detalhes: error.message });
   }
+});
+
+app.listen(port, () => {
+  console.log(`✅ Servidor rodando na porta ${port}`);
 });
