@@ -1,50 +1,183 @@
 const express = require('express');
-const mercadopago = require('mercadopago');
-const admin = require('firebase-admin');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const admin = require('./firebaseConfig');
+const { MercadoPagoConfig } = require('mercadopago');
+const moment = require('moment-timezone');
+
 
 const app = express();
-app.use(express.json());
+const port = process.env.PORT || 3000;
 
-const mp = new mercadopago.SDK(process.env.MP_ACCESS_TOKEN);
+const fetch = global.fetch;
 
-app.get('/pagamento/:id', async (req, res) => {
-  const id = req.params.id;
-  const valor = parseFloat(req.query.valor) || 30;
+const mpAccessToken = process.env.MP_ACCESS_TOKEN || 'APP_USR-8788773395916849-053008-25d39705629784593abde20b15d8fb2f-568286023';
+
+// Inicializa o Mercado Pago
+const client = new MercadoPagoConfig({ accessToken: mpAccessToken });
+
+app.use(cors());
+app.use(bodyParser.json());
+
+
+
+// Rota raiz para teste básico
+app.get('/', (req, res) => {
+  res.send('Backend está rodando! Use /jogos-hoje para ver os jogos do dia.');
+});
+
+// ✅ Criar pagamento PIX
+app.post('/criar-pagamento', async (req, res) => {
+  const { aposta, telefone, valor } = req.body;
+
+  if (!aposta || !telefone || !valor) {
+    return res.status(400).json({ erro: 'Aposta, telefone e valor são obrigatórios.' });
+  }
 
   try {
-    const pedidoDoc = await admin.firestore().collection('pedidos').doc(id).get();
-    if (!pedidoDoc.exists) {
-      return res.status(404).json({ erro: 'Pedido não encontrado' });
+    const idempotencyKey = Date.now().toString();
+
+    const response = await fetch('https://api.mercadopago.com/v1/payments', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${mpAccessToken}`,
+        'X-Idempotency-Key': idempotencyKey
+      },
+      body: JSON.stringify({
+        transaction_amount: parseFloat(valor),
+        description: `Aposta: ${aposta}`,
+        payment_method_id: 'pix',
+        payer: {
+          email: `${telefone.replace(/\D/g, '')}@apostas.com`,
+          first_name: 'Apostador',
+          last_name: telefone
+        },
+        external_reference: JSON.stringify({ aposta, telefone })
+      })
+    });
+
+    const data = await response.json();
+
+    if (!data.point_of_interaction) {
+      console.error('❌ Erro no retorno do Mercado Pago:', data);
+      throw new Error('Erro ao obter informações de pagamento.');
     }
 
-    const pagamento = {
-      transaction_amount: valor,
-      description: `Pedido Tilápia Peixaria SLZ #${id}`,
-      payment_method_id: "pix",
-      payer: { email: "cliente@email.com" },
-      notification_url: "https://peixaria.onrender.com/webhook"
-    };
-
-    const pagamentoCriado = await mp.payment.create(pagamento);
-    const pix = pagamentoCriado.body.point_of_interaction.transaction_data;
-
-    await admin.firestore().collection('pedidos').doc(id).update({
-      status: "aguardando pagamento",
-      pagamento_id: pagamentoCriado.body.id,
-      valor
-    });
-
     res.json({
-      pix_code: pix.transaction_id,
-      qr_code_base64: pix.qr_code_base64
+      qr_code_base64: data.point_of_interaction.transaction_data.qr_code_base64,
+      qr_code: data.point_of_interaction.transaction_data.qr_code,
+      payment_id: data.id
     });
+
   } catch (error) {
-    console.error('Erro ao gerar pagamento:', error);
-    res.status(500).json({ erro: 'Erro ao gerar pagamento', detalhes: error.message });
+    console.error('❌ Erro ao gerar pagamento PIX:', error);
+    res.status(500).json({ erro: 'Erro ao gerar pagamento PIX.', detalhes: error.message });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+// ✅ Webhook Mercado Pago
+app.post('/webhook', async (req, res) => {
+  const data = req.body;
 
-module.exports = app;
+  try {
+    if (data.type === 'payment' && data.data?.id) {
+      const paymentId = data.data.id;
+
+      const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+        headers: {
+          Authorization: `Bearer ${mpAccessToken}`
+        }
+      });
+
+      const payment = await response.json();
+
+      if (payment.status === 'approved') {
+        const { external_reference, transaction_amount } = payment;
+
+        let info = { aposta: '', telefone: '' };
+        try {
+          info = JSON.parse(external_reference);
+        } catch (e) {
+          console.warn('⚠️ Erro ao converter external_reference:', e);
+        }
+
+        // Salva no Firestore
+        await admin.firestore().collection('apostas').add({
+          aposta: info.aposta,
+          telefone: info.telefone,
+          valor: transaction_amount,
+          status: payment.status,
+          payment_id: payment.id,
+          data_pagamento: new Date()
+        });
+
+        console.log(`✅ Pagamento aprovado e salvo no Firestore para: ${info.telefone}`);
+
+        // Envia WhatsApp automático após aprovação
+        try {
+          const whatsappResponse = await fetch('https://aposta-backend.onrender.com/api/enviar-whatsapp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              telefone: info.telefone,
+              mensagem: `✅ Pagamento aprovado para a aposta: ${info.aposta}. Boa sorte.🍀💰🎉⚽`
+            })
+          });
+
+          if (whatsappResponse.ok) {
+            console.log(`📲 WhatsApp enviado para ${info.telefone}`);
+          } else {
+            const error = await whatsappResponse.text();
+            console.error('❌ Erro ao enviar WhatsApp:', error);
+          }
+        } catch (e) {
+          console.error('❌ Erro no envio do WhatsApp:', e);
+        }
+      }
+    }
+
+    res.sendStatus(200);
+  } catch (error) {
+    console.error('❌ Erro no webhook:', error);
+    res.sendStatus(500);
+  }
+});
+
+
+// ✅ Consultar status de pagamento
+app.get('/status-pagamento/:paymentId', async (req, res) => {
+  const { paymentId } = req.params;
+  try {
+    const apostasRef = admin.firestore().collection('apostas');
+
+    // CONVERSÃO para número
+    const snapshot = await apostasRef
+      .where('payment_id', '==', Number(paymentId))
+      .get();
+
+    if (snapshot.empty) {
+      return res.json({ status: 'pending' });
+    }
+
+    let status = 'pending';
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.status === 'approved') {
+        status = 'approved';
+      }
+    });
+
+    return res.json({ status });
+
+  } catch (error) {
+    console.error('Erro ao consultar status:', error);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+  
+});
+
+// ✅ Inicia o servidor
+app.listen(port, () => {
+  console.log(`✅ Servidor rodando na porta ${port}`);
+});
