@@ -2,17 +2,19 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const admin = require('./firebaseConfig');
-const { Payment, configure } = require('mercadopago');
-
-configure({
-  access_token: process.env.MP_ACCESS_TOKEN
-});
+const { MercadoPagoConfig, Payment } = require('mercadopago');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(bodyParser.json());
+
+// Token de acesso do Mercado Pago
+const mpAccessToken = process.env.MP_ACCESS_TOKEN || 'SEU_TOKEN_AQUI';
+
+// Instância do cliente Mercado Pago
+const mp = new MercadoPagoConfig({ accessToken: mpAccessToken });
 
 app.get('/', (req, res) => {
   res.send('Backend está rodando! Use /pagamento/:id?valor=XX');
@@ -28,7 +30,7 @@ app.get('/pagamento/:id', async (req, res) => {
       return res.status(404).json({ erro: 'Pedido não encontrado' });
     }
 
-    const pagamentoCriado = await Payment.create({
+    const pagamentoCriado = await new Payment(mp).create({
       transaction_amount: valor,
       description: `Pedido Tilápia Peixaria SLZ #${id}`,
       payment_method_id: "pix",
@@ -36,14 +38,15 @@ app.get('/pagamento/:id', async (req, res) => {
       notification_url: "https://peixaria.onrender.com/webhook"
     });
 
-    const pix = pagamentoCriado.body?.point_of_interaction?.transaction_data;
+    const pix = pagamentoCriado.point_of_interaction?.transaction_data;
+
     if (!pix) {
-      throw new Error("Erro ao gerar QR Code Pix.");
+      return res.status(500).json({ erro: 'Erro ao gerar dados PIX.' });
     }
 
     await admin.firestore().collection('pedidos').doc(id).update({
       status: "aguardando pagamento",
-      pagamento_id: pagamentoCriado.body.id,
+      pagamento_id: pagamentoCriado.id,
       valor
     });
 
@@ -53,11 +56,11 @@ app.get('/pagamento/:id', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erro ao gerar pagamento:', error.message || error);
+    console.error('Erro ao gerar pagamento:', error);
     res.status(500).json({ erro: 'Erro ao gerar pagamento', detalhes: error.message });
   }
 });
 
 app.listen(port, () => {
-  console.log(`Servidor rodando na porta ${port}`);
+  console.log(`✅ Servidor rodando na porta ${port}`);
 });
