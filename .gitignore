@@ -1,0 +1,27 @@
+# Node
+node_modules/
+npm-debug.log
+
+# VSCode
+.vscode/
+#package-lock.json
+package-lock.json
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Ambientes
+.env
+.env.local
+.env.*.local
+
+# Firebase
+firebase-debug.log
+firebase-debug.*
+
+# Build
+dist/
+build/
