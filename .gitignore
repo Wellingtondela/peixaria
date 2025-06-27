@@ -1,7 +1,8 @@
 # Node
 node_modules/
 npm-debug.log
-
+#.txt
+.txt
 # VSCode
 .vscode/
 #package-lock.json

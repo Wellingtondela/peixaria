@@ -1,12 +1,11 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const mercadopago = require('mercadopago');
+const { MercadoPagoConfig, payments } = require('mercadopago');
 const admin = require('./firebaseConfig');
 
-mercadopago.configure({
-  access_token: process.env.MP_ACCESS_TOKEN
-});
+// Configuração do SDK do Mercado Pago (versão 2.7.0+)
+const mp = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -36,12 +35,12 @@ app.get('/pagamento/:id', async (req, res) => {
       notification_url: "https://peixaria.onrender.com/webhook"
     };
 
-    const pagamentoCriado = await mercadopago.payment.create(pagamento);
-    const pix = pagamentoCriado.body.point_of_interaction.transaction_data;
+    const pagamentoCriado = await payments.create({ body: pagamento, config: mp });
+    const pix = pagamentoCriado.point_of_interaction.transaction_data;
 
     await admin.firestore().collection('pedidos').doc(id).update({
       status: "aguardando pagamento",
-      pagamento_id: pagamentoCriado.body.id,
+      pagamento_id: pagamentoCriado.id,
       valor
     });
 
@@ -63,8 +62,8 @@ app.post('/webhook', async (req, res) => {
   }
 
   try {
-    const pagamento = await mercadopago.payment.findById(pagamentoId);
-    if (pagamento.body.status === "approved") {
+    const pagamento = await payments.get({ id: pagamentoId, config: mp });
+    if (pagamento.status === "approved") {
       const snapshot = await admin.firestore().collection('pedidos')
         .where("pagamento_id", "==", pagamentoId).limit(1).get();
 
@@ -84,5 +83,5 @@ app.post('/webhook', async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`Servidor rodando na porta ${port}`);
+  console.log(`✅ Servidor rodando na porta ${port}`);
 });
