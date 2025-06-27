@@ -23,29 +23,21 @@ app.get('/', (req, res) => {
 });
 
 // Criar pagamento PIX
-app.post('/pagamento/:id', async (req, res) => {
+app.get('/pagamento/:id', async (req, res) => {
   const id = req.params.id;
-  // Pode receber valor via query ou corpo
-  const valorParam = req.query.valor || req.body.valor;
-  const valor = valorParam && !isNaN(parseFloat(valorParam)) ? parseFloat(valorParam) : null;
-
-  if (!valor) {
-    return res.status(400).json({ erro: 'Valor inválido ou não informado.' });
-  }
+  const valorParam = req.query.valor;
+  const valor = valorParam && !isNaN(parseFloat(valorParam)) ? parseFloat(valorParam) : 30;
 
   try {
-    // Busca o pedido no Firestore para pegar telefone/email para o pagador
+    // pega pedido Firestore (verifique se existe)
     const pedidoDoc = await admin.firestore().collection('pedidos').doc(id).get();
     if (!pedidoDoc.exists) {
-      return res.status(404).json({ erro: 'Pedido não encontrado.' });
+      return res.status(404).json({ erro: 'Pedido não encontrado' });
     }
-    const pedido = pedidoDoc.data();
-
-    const telefone = pedido.whatsapp || '00000000000';
-    const email = pedido.email || 'cliente@peixaria.com';
 
     const idempotencyKey = Date.now().toString();
 
+    // Requisição ao Mercado Pago com tratamento de resposta
     const response = await fetch('https://api.mercadopago.com/v1/payments', {
       method: 'POST',
       headers: {
@@ -55,42 +47,43 @@ app.post('/pagamento/:id', async (req, res) => {
       },
       body: JSON.stringify({
         transaction_amount: valor,
-        description: `Pedido Peixaria SLZ #${id}`,
+        description: `Pedido Tilápia Peixaria SLZ #${id}`,
         payment_method_id: 'pix',
-        payer: {
-          email: email,
-          first_name: pedido.nome || 'Cliente',
-          last_name: telefone
-        },
-        external_reference: id // pode usar o id do pedido como referência
+        payer: { email: 'cliente@email.com' },
+        notification_url: 'https://peixaria.onrender.com/webhook'
       })
     });
 
-    const data = await response.json();
+    const contentType = response.headers.get('content-type');
 
-    if (!data.point_of_interaction) {
-      console.error('Erro no retorno do Mercado Pago:', data);
-      return res.status(500).json({ erro: 'Erro ao obter informações de pagamento.', detalhes: data });
+    if (contentType && contentType.includes('application/json')) {
+      const data = await response.json();
+
+      if (!data.point_of_interaction) {
+        return res.status(500).json({ erro: 'Erro ao gerar dados PIX.' });
+      }
+
+      await admin.firestore().collection('pedidos').doc(id).update({
+        status: "aguardando pagamento",
+        pagamento_id: data.id,
+        valor
+      });
+
+      return res.json({
+        pix_code: data.point_of_interaction.transaction_data.transaction_id,
+        qr_code_base64: data.point_of_interaction.transaction_data.qr_code_base64
+      });
+    } else {
+      const text = await response.text();
+      console.error('Resposta inesperada da API Mercado Pago:', text);
+      return res.status(500).json({ erro: 'Resposta inesperada da API Mercado Pago' });
     }
-
-    // Atualiza o pedido com status e id do pagamento
-    await admin.firestore().collection('pedidos').doc(id).update({
-      status: "aguardando pagamento",
-      pagamento_id: data.id,
-      valor
-    });
-
-    res.json({
-      pix_code: data.point_of_interaction.transaction_data.qr_code,
-      qr_code_base64: data.point_of_interaction.transaction_data.qr_code_base64,
-      payment_id: data.id
-    });
-
   } catch (error) {
-    console.error('Erro ao gerar pagamento PIX:', error);
-    res.status(500).json({ erro: 'Erro ao gerar pagamento PIX.', detalhes: error.message });
+    console.error('Erro ao gerar pagamento:', error);
+    return res.status(500).json({ erro: 'Erro ao gerar pagamento', detalhes: error.message });
   }
 });
+
 
 // Webhook Mercado Pago para atualizar status
 app.post('/webhook', async (req, res) => {
