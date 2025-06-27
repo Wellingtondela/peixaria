@@ -70,7 +70,7 @@ app.get('/pagamento/:id', async (req, res) => {
       });
 
       return res.json({
-        pix_code: data.point_of_interaction.transaction_data.transaction_id,
+        pix_code: data.point_of_interaction.transaction_data.qr_code, 
         qr_code_base64: data.point_of_interaction.transaction_data.qr_code_base64
       });
     } else {
