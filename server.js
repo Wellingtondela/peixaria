@@ -11,15 +11,20 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static('public'));
 
+// Access Token do Mercado Pago (ideal: usar variável de ambiente)
 const mpAccessToken = process.env.MP_ACCESS_TOKEN || 'SEU_TOKEN_AQUI';
 const mp = new MercadoPagoConfig({ accessToken: mpAccessToken });
 
 app.get('/', (req, res) => {
-  res.send('Backend está rodando! Use /pagamento/:id?valor=XX');
+  res.send('✅ Backend rodando! Use /pagamento/:id?valor=XX');
 });
 
 app.get('/pagamento/:id', async (req, res) => {
   const id = req.params.id;
+  const valorParam = req.query.valor;
+  const valor = valorParam && !isNaN(parseFloat(valorParam)) ? parseFloat(valorParam) : 30;
+
+  console.log('Valor usado para pagamento:', valor);
 
   try {
     const pedidoDoc = await admin.firestore().collection('pedidos').doc(id).get();
@@ -27,35 +32,26 @@ app.get('/pagamento/:id', async (req, res) => {
       return res.status(404).json({ erro: 'Pedido não encontrado' });
     }
 
-    const pedidoData = pedidoDoc.data();
-
-    // Usa o valor do pedido no Firestore, se existir e for número válido
-    const valor = (pedidoData.valor && typeof pedidoData.valor === 'number' && pedidoData.valor > 0)
-      ? pedidoData.valor
-      : 30;
-
-    console.log('Valor usado para pagamento:', valor);
-
-    const payment = new Payment(mp);
-console.log('Valor usado para pagamento:', valor);
-
-    const pagamentoCriado = await payment.create({
-      transaction_amount: valor,
-      description: `Pedido Tilápia Peixaria SLZ #${id}`,
-      payment_method_id: "pix",
-      payer: { email: "cliente@email.com" },
-      notification_url: "https://peixaria.onrender.com/webhook"
+    const pagamentoCriado = await Payment.create({
+      body: {
+        transaction_amount: valor,
+        description: `Pedido Tilápia Peixaria SLZ #${id}`,
+        payment_method_id: 'pix',
+        payer: { email: 'cliente@email.com' },
+        notification_url: 'https://peixaria.onrender.com/webhook'
+      },
+      config: mp
     });
 
-    const pix = pagamentoCriado.point_of_interaction?.transaction_data;
+    const pix = pagamentoCriado.body.point_of_interaction?.transaction_data;
 
     if (!pix) {
       return res.status(500).json({ erro: 'Erro ao gerar dados PIX.' });
     }
 
     await admin.firestore().collection('pedidos').doc(id).update({
-      status: "aguardando pagamento",
-      pagamento_id: pagamentoCriado.id,
+      status: 'aguardando pagamento',
+      pagamento_id: pagamentoCriado.body.id,
       valor
     });
 
@@ -65,7 +61,7 @@ console.log('Valor usado para pagamento:', valor);
     });
 
   } catch (error) {
-    console.error('Erro ao gerar pagamento:', error);
+    console.error('❌ Erro ao gerar pagamento:', error);
     res.status(500).json({ erro: 'Erro ao gerar pagamento', detalhes: error.message });
   }
 });
