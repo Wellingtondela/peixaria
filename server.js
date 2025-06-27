@@ -9,6 +9,7 @@ const port = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(bodyParser.json());
+app.use(express.static('public'));
 
 const mpAccessToken = process.env.MP_ACCESS_TOKEN || 'SEU_TOKEN_AQUI';
 const mp = new MercadoPagoConfig({ accessToken: mpAccessToken });
