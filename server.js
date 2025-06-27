@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const admin = require('./firebaseConfig'); // Firebase Admin inicializado
+const admin = require('./firebaseConfig');
 const { MercadoPagoConfig, Payment } = require('mercadopago');
 
 const app = express();
@@ -9,14 +9,13 @@ const port = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(bodyParser.json());
-app.use(express.static('public')); // Para servir HTML do Pix se quiser
+app.use(express.static('public'));
 
-// Token de acesso Mercado Pago
-const mpAccessToken = process.env.MP_ACCESS_TOKEN || 'SEU_TOKEN_DO_MERCADO_PAGO_AQUI';
+const mpAccessToken = process.env.MP_ACCESS_TOKEN || 'SEU_TOKEN_AQUI';
 const mp = new MercadoPagoConfig({ accessToken: mpAccessToken });
 
 app.get('/', (req, res) => {
-  res.send('✅ Backend da Peixaria SLZ rodando. Use /pagamento/:id?valor=XX');
+  res.send('✅ Backend da Peixaria SLZ está rodando!');
 });
 
 app.get('/pagamento/:id', async (req, res) => {
@@ -28,19 +27,18 @@ app.get('/pagamento/:id', async (req, res) => {
 
   try {
     const pedidoDoc = await admin.firestore().collection('pedidos').doc(id).get();
+
     if (!pedidoDoc.exists) {
       return res.status(404).json({ erro: 'Pedido não encontrado' });
     }
 
-    const pagamentoCriado = await Payment.create({
-      body: {
-        transaction_amount: valor,
-        description: `Pedido Tilápia Peixaria SLZ #${id}`,
-        payment_method_id: "pix",
-        payer: { email: "cliente@email.com" },
-        notification_url: "https://peixaria.onrender.com/webhook"
-      },
-      config: mp
+    const payment = new Payment(mp); // ✅ Instanciando com a config
+    const pagamentoCriado = await payment.create({
+      transaction_amount: valor,
+      description: `Pedido Tilápia Peixaria SLZ #${id}`,
+      payment_method_id: "pix",
+      payer: { email: "cliente@email.com" },
+      notification_url: "https://peixaria.onrender.com/webhook"
     });
 
     const pix = pagamentoCriado.point_of_interaction?.transaction_data;
