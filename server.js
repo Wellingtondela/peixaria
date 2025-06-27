@@ -10,10 +10,7 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
-// Token de acesso do Mercado Pago
 const mpAccessToken = process.env.MP_ACCESS_TOKEN || 'SEU_TOKEN_AQUI';
-
-// Instância do cliente Mercado Pago
 const mp = new MercadoPagoConfig({ accessToken: mpAccessToken });
 
 app.get('/', (req, res) => {
@@ -22,7 +19,8 @@ app.get('/', (req, res) => {
 
 app.get('/pagamento/:id', async (req, res) => {
   const id = req.params.id;
-  const valor = parseFloat(req.query.valor) || 30;
+  const valorParam = req.query.valor;
+  const valor = valorParam && !isNaN(parseFloat(valorParam)) ? parseFloat(valorParam) : 30;
 
   try {
     const pedidoDoc = await admin.firestore().collection('pedidos').doc(id).get();
@@ -30,7 +28,8 @@ app.get('/pagamento/:id', async (req, res) => {
       return res.status(404).json({ erro: 'Pedido não encontrado' });
     }
 
-    const pagamentoCriado = await new Payment(mp).create({
+    const payment = new Payment(mp); // ✅ instanciando corretamente
+    const pagamentoCriado = await payment.create({
       transaction_amount: valor,
       description: `Pedido Tilápia Peixaria SLZ #${id}`,
       payment_method_id: "pix",
