@@ -37,6 +37,7 @@ app.get('/pagamento/:id', async (req, res) => {
     console.log('Valor usado para pagamento:', valor);
 
     const payment = new Payment(mp);
+console.log('Valor usado para pagamento:', valor);
 
     const pagamentoCriado = await payment.create({
       transaction_amount: valor,
