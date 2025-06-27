@@ -2,7 +2,6 @@
   "name": "peixaria-backend",
   "version": "1.0.0",
   "main": "server.js",
-  
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js"
@@ -18,5 +17,8 @@
     "url": "https://github.com/Wellingtondela/peixaria/issues"
   },
   "homepage": "https://github.com/Wellingtondela/peixaria#readme",
-  "description": ""
+  "description": "",
+  "dependencies": {
+    "express": "^5.1.0"
+  }
 }
