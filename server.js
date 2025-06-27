@@ -20,8 +20,6 @@ app.get('/', (req, res) => {
 
 app.get('/pagamento/:id', async (req, res) => {
   const id = req.params.id;
-  const valorParam = req.query.valor;
-  const valor = valorParam && !isNaN(parseFloat(valorParam)) ? parseFloat(valorParam) : 30;
 
   try {
     const pedidoDoc = await admin.firestore().collection('pedidos').doc(id).get();
@@ -29,7 +27,17 @@ app.get('/pagamento/:id', async (req, res) => {
       return res.status(404).json({ erro: 'Pedido não encontrado' });
     }
 
-    const payment = new Payment(mp); // ✅ instanciando corretamente
+    const pedidoData = pedidoDoc.data();
+
+    // Usa o valor do pedido no Firestore, se existir e for número válido
+    const valor = (pedidoData.valor && typeof pedidoData.valor === 'number' && pedidoData.valor > 0)
+      ? pedidoData.valor
+      : 30;
+
+    console.log('Valor usado para pagamento:', valor);
+
+    const payment = new Payment(mp);
+
     const pagamentoCriado = await payment.create({
       transaction_amount: valor,
       description: `Pedido Tilápia Peixaria SLZ #${id}`,
