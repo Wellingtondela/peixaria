@@ -2,13 +2,14 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const mercadopago = require('mercadopago');
-const admin = require('./firebaseConfig'); // aqui você deve exportar o admin inicializado
+const admin = require('./firebaseConfig');
+
+mercadopago.configure({
+  access_token: process.env.MP_ACCESS_TOKEN
+});
 
 const app = express();
 const port = process.env.PORT || 3000;
-
-const mpAccessToken = process.env.MP_ACCESS_TOKEN || 'SEU_TOKEN_MERCADO_PAGO_AQUI';
-const mp = new mercadopago.SDK(mpAccessToken);
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -35,7 +36,7 @@ app.get('/pagamento/:id', async (req, res) => {
       notification_url: "https://peixaria.onrender.com/webhook"
     };
 
-    const pagamentoCriado = await mp.payment.create(pagamento);
+    const pagamentoCriado = await mercadopago.payment.create(pagamento);
     const pix = pagamentoCriado.body.point_of_interaction.transaction_data;
 
     await admin.firestore().collection('pedidos').doc(id).update({
@@ -62,7 +63,7 @@ app.post('/webhook', async (req, res) => {
   }
 
   try {
-    const pagamento = await mp.payment.findById(pagamentoId);
+    const pagamento = await mercadopago.payment.findById(pagamentoId);
     if (pagamento.body.status === "approved") {
       const snapshot = await admin.firestore().collection('pedidos')
         .where("pagamento_id", "==", pagamentoId).limit(1).get();
