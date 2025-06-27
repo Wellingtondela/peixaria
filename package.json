@@ -19,6 +19,7 @@
   "homepage": "https://github.com/Wellingtondela/peixaria#readme",
   "description": "",
   "dependencies": {
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "mercadopago": "^2.8.0"
   }
 }
